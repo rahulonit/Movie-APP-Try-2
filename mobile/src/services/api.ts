@@ -64,12 +64,12 @@ class ApiService {
   // Auth
   async register(email: string, password: string) {
     const response = await this.api.post('/auth/register', { email, password });
-    return response.data;
+    return response; // return full Axios response so callers can access `response.data`
   }
 
   async login(email: string, password: string) {
     const response = await this.api.post('/auth/login', { email, password });
-    return response.data;
+    return response; // return full Axios response so callers can access `response.data`
   }
 
   async logout() {
