@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "OTT Streaming",
+    "slug": "ott-streaming-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ottstreaming.app"
+    },
+    "android": {
+      "package": "com.ottstreaming.app"
+    },
+    "web": {},
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
+        }
+      ]
+    ]
+  }
+}
