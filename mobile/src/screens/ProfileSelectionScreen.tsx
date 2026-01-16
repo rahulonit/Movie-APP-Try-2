@@ -53,7 +53,6 @@ export default function ProfileSelectionScreen() {
 
   const handleSelectProfile = (profile: any) => {
     dispatch(setActiveProfile(profile));
-    navigation.navigate('Main');
   };
 
   const renderProfile = ({ item }: any) => (

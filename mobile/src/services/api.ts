@@ -81,6 +81,29 @@ class ApiService {
   // Probe candidate hosts and set baseURL to the first reachable one.
   private async resolveAndSetBaseURL() {
     if (this.resolved) return;
+    // Highest priority: public env vars (usable with EAS/Expo envs)
+    const envBase = process.env.EXPO_PUBLIC_API_BASE_URL || process.env.EXPO_PUBLIC_API_HOST;
+    if (envBase) {
+      const normalized = envBase.startsWith('http') ? envBase : `http://${envBase}`;
+      this.baseURL = normalized.endsWith('/api') ? normalized : `${normalized.replace(/\/$/, '')}/api`;
+      this.resolved = true;
+      console.log('Resolved API base URL from EXPO_PUBLIC env', this.baseURL);
+      return;
+    }
+
+    // Honor explicit override first (production-ready path)
+    try {
+      const extra = (Constants as any)?.manifest?.extra || (Constants as any)?.expoConfig?.extra;
+      const explicit = extra?.API_BASE_URL || extra?.API_HOST;
+      if (explicit) {
+        const normalized = explicit.startsWith('http') ? explicit : `http://${explicit}`;
+        this.baseURL = normalized.endsWith('/api') ? normalized : `${normalized.replace(/\/$/, '')}/api`;
+        this.resolved = true;
+        console.log('Resolved API base URL from expo extra', this.baseURL);
+        return;
+      }
+    } catch (e) {}
+
     const candidates: string[] = [];
     try {
       const detected = (API_BASE_URL.match(/http:\/\/([^:/]+)/) || [])[1];

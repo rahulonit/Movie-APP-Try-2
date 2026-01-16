@@ -42,7 +42,6 @@ export default function LoginScreen({ navigation }: any) {
     dispatch(setActiveProfile(guest));
     // mark session as guest-authenticated so navigator shows Main
     dispatch(setGuestAuth(null));
-    navigation.navigate('Main');
   };
 
   return (

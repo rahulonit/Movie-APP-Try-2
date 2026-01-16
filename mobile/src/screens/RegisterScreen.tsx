@@ -56,8 +56,7 @@ export default function RegisterScreen({ navigation }: Props) {
     setIsLoading(true);
     try {
       await dispatch(register({ email, password, profileName })).unwrap();
-      // On success, navigate to profile selection or home
-      navigation.replace('ProfileSelection');
+      // No manual navigation; navigator will switch to ProfileSelection when auth state updates
     } catch (error: unknown) {
       // Handle both string and Thunk rejection payloads
       let message = 'Registration failed';
