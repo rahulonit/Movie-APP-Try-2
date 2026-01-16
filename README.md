@@ -65,7 +65,7 @@ MUX_TOKEN_SECRET=your_mux_token_secret
 npm run dev
 ```
 
-Server will run at `http://localhost:5000`
+Server will run at `http://localhost:5002`
 
 ### Mobile App Setup
 
@@ -82,7 +82,7 @@ npm install
 3. **Update API URL:**
 Edit `src/services/api.ts`:
 ```typescript
-const API_BASE_URL = 'http://YOUR_IP:5000/api';
+const API_BASE_URL = 'http://YOUR_IP:5002/api';
 ```
 
 4. **Start Expo:**

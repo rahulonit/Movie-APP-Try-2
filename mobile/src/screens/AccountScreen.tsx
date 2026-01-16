@@ -14,7 +14,7 @@ import { setActiveProfile } from '../store/slices/profileSlice';
 
 export default function AccountScreen() {
   const dispatch = useDispatch<AppDispatch>();
-  const { user } = useSelector((state: RootState) => state.auth);
+  const { user, isLoggingOut } = useSelector((state: RootState) => state.auth);
   const { activeProfile } = useSelector((state: RootState) => state.profile);
 
   const handleLogout = () => {
@@ -23,7 +23,14 @@ export default function AccountScreen() {
       {
         text: 'Logout',
         style: 'destructive',
-        onPress: () => dispatch(logout()),
+        onPress: async () => {
+          try {
+            await dispatch(logout()).unwrap();
+          } catch (err: any) {
+            const message = typeof err === 'string' ? err : err?.message || 'Logout failed';
+            Alert.alert('Logout failed', message);
+          }
+        },
       },
     ]);
   };
@@ -78,8 +85,9 @@ export default function AccountScreen() {
       <TouchableOpacity
         style={[styles.button, styles.logoutButton]}
         onPress={handleLogout}
+        disabled={isLoggingOut}
       >
-        <Text style={styles.buttonText}>Logout</Text>
+        <Text style={styles.buttonText}>{isLoggingOut ? 'Logging out...' : 'Logout'}</Text>
       </TouchableOpacity>
 
       <Text style={styles.version}>Version 1.0.0</Text>

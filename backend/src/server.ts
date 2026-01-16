@@ -1,5 +1,10 @@
-import express, { Application } from 'express';
 import dotenv from 'dotenv';
+dotenv.config();
+import express, { Application } from 'express';
+
+// Load environment variables as early as possible so other modules (auth, mux, etc.)
+// can read `process.env` during their initialization.
+dotenv.config();
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -14,8 +19,7 @@ import contentRoutes from './routes/contentRoutes';
 import userRoutes from './routes/userRoutes';
 import adminRoutes from './routes/adminRoutes';
 
-// Load environment variables
-dotenv.config();
+// (dotenv already configured above)
 
 // Connect to MongoDB
 connectDB();
@@ -30,16 +34,23 @@ app.use(helmet({
 
 // ===== CORS =====
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
+
+// In development allow all origins (makes working with Expo/dev servers easier).
+// In production, use the explicit ALLOWED_ORIGINS list for security.
+const corsOptions = process.env.NODE_ENV === 'development'
+  ? { origin: true, credentials: true }
+  : {
+      origin: (origin: any, callback: any) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
+      credentials: true
+    };
+
+app.use(cors(corsOptions));
 
 // ===== Body Parsers =====
 app.use(express.json({ limit: '10mb' }));
@@ -89,9 +100,11 @@ app.use(notFound);
 app.use(errorHandler);
 
 // ===== Start Server =====
-const PORT = process.env.PORT || 5001;
+// Default to 5002 to avoid conflicts with other local services
+const PORT = process.env.PORT || 5002;
+const HOST = process.env.HOST || '0.0.0.0';
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(`
 ╔═══════════════════════════════════════╗
 ║   OTT Streaming Platform Server      ║

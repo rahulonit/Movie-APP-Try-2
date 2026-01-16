@@ -23,6 +23,11 @@ const registerValidation = [
     .withMessage('Password must be at least 8 characters')
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
     .withMessage('Password must contain uppercase, lowercase, and number'),
+  body('profileName')
+    .optional()
+    .isString()
+    .isLength({ max: 50 })
+    .withMessage('Profile name must be at most 50 characters'),
   body('role')
     .optional()
     .isIn(['USER', 'ADMIN'])

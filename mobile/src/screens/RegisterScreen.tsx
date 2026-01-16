@@ -13,34 +13,60 @@ import { useDispatch } from 'react-redux';
 import { register } from '../store/slices/authSlice';
 import { AppDispatch } from '../store';
 
-export default function RegisterScreen({ navigation }: any) {
-  const dispatch = useDispatch<AppDispatch>();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+type Props = {
+  navigation: any;
+};
 
-  const handleRegister = async () => {
+export default function RegisterScreen({ navigation }: Props) {
+  const dispatch = useDispatch<AppDispatch>();
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [profileName, setProfileName] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  const validate = () => {
     if (!email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill all fields');
-      return;
+      return false;
     }
 
     if (password !== confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
-      return;
+      return false;
     }
 
     if (password.length < 8) {
       Alert.alert('Error', 'Password must be at least 8 characters');
-      return;
+      return false;
     }
+
+    const complexity = /(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;
+    if (!complexity.test(password)) {
+      Alert.alert('Error', 'Password must contain uppercase, lowercase, and number');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleRegister = async () => {
+    if (!validate()) return;
 
     setIsLoading(true);
     try {
-      await dispatch(register({ email, password })).unwrap();
-    } catch (error: any) {
-      Alert.alert('Registration Failed', error);
+      await dispatch(register({ email, password, profileName })).unwrap();
+      // On success, navigate to profile selection or home
+      navigation.replace('ProfileSelection');
+    } catch (error: unknown) {
+      // Handle both string and Thunk rejection payloads
+      let message = 'Registration failed';
+      if (typeof error === 'string') message = error;
+      else if (error && typeof error === 'object') {
+        // @ts-ignore - attempt common shapes
+        message = error?.message || error?.toString?.() || message;
+      }
+      Alert.alert('Registration Failed', message);
     } finally {
       setIsLoading(false);
     }
@@ -63,6 +89,7 @@ export default function RegisterScreen({ navigation }: any) {
           onChangeText={setEmail}
           autoCapitalize="none"
           keyboardType="email-address"
+          textContentType="emailAddress"
         />
 
         <TextInput
@@ -72,6 +99,7 @@ export default function RegisterScreen({ navigation }: any) {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          textContentType="newPassword"
         />
 
         <TextInput
@@ -81,16 +109,24 @@ export default function RegisterScreen({ navigation }: any) {
           value={confirmPassword}
           onChangeText={setConfirmPassword}
           secureTextEntry
+          textContentType="password"
         />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Profile name (optional)"
+            placeholderTextColor="#808080"
+            value={profileName}
+            onChangeText={setProfileName}
+            maxLength={50}
+          />
 
         <TouchableOpacity
           style={[styles.button, isLoading && styles.buttonDisabled]}
           onPress={handleRegister}
           disabled={isLoading}
         >
-          <Text style={styles.buttonText}>
-            {isLoading ? 'Loading...' : 'Sign Up'}
-          </Text>
+          <Text style={styles.buttonText}>{isLoading ? 'Loading...' : 'Sign Up'}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => navigation.navigate('Login')}>

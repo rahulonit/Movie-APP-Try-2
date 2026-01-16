@@ -11,7 +11,7 @@ import {
 // Register new user
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password, role, profileName } = req.body;
 
     // Check if user exists
     const existingUser = await User.findOne({ email });
@@ -26,6 +26,18 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     // Hash password
     const passwordHash = await hashPassword(password);
 
+    // Build initial profile if profileName provided
+    const initialProfiles = [] as any[];
+    if (profileName && typeof profileName === 'string' && profileName.trim().length > 0) {
+      initialProfiles.push({
+        name: profileName.trim(),
+        avatar: 'https://res.cloudinary.com/demo/image/upload/avatar-default.png',
+        isKids: false,
+        watchHistory: [],
+        myList: []
+      });
+    }
+
     // Create user
     const user = await User.create({
       email,
@@ -35,7 +47,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         plan: SubscriptionPlan.FREE,
         status: SubscriptionStatus.ACTIVE
       },
-      profiles: []
+      profiles: initialProfiles
     });
 
     // Generate tokens
@@ -54,7 +66,8 @@ export const register = async (req: Request, res: Response): Promise<void> => {
           id: user._id,
           email: user.email,
           role: user.role,
-          subscription: user.subscription
+          subscription: user.subscription,
+          profiles: user.profiles
         },
         accessToken,
         refreshToken

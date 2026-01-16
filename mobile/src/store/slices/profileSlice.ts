@@ -34,12 +34,42 @@ export const fetchProfiles = createAsyncThunk(
 
 export const createProfile = createAsyncThunk(
   'profile/create',
-  async ({ name, isKids }: { name: string; isKids: boolean }, { rejectWithValue }) => {
+  async (
+    { name, isKids, avatar }: { name: string; isKids: boolean; avatar?: string },
+    { rejectWithValue }
+  ) => {
     try {
-      const response = await apiService.createProfile(name, isKids);
+      const response = await apiService.createProfile(name, isKids, avatar);
       return response.data.profile;
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Failed to create profile');
+    }
+  }
+);
+
+export const updateProfile = createAsyncThunk(
+  'profile/update',
+  async (
+    { profileId, name, avatar }: { profileId: string; name?: string; avatar?: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await apiService.updateProfile(profileId, { name, avatar });
+      return response.data.profile;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to update profile');
+    }
+  }
+);
+
+export const deleteProfile = createAsyncThunk(
+  'profile/delete',
+  async (profileId: string, { rejectWithValue }) => {
+    try {
+      await apiService.deleteProfile(profileId);
+      return profileId;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to delete profile');
     }
   }
 );
@@ -101,6 +131,24 @@ const profileSlice = createSlice({
     // Create profile
     builder.addCase(createProfile.fulfilled, (state, action) => {
       state.profiles.push(action.payload);
+    });
+
+    // Update profile
+    builder.addCase(updateProfile.fulfilled, (state, action) => {
+      const updated = action.payload;
+      state.profiles = state.profiles.map((p) => (p._id === updated._id ? updated : p));
+      if (state.activeProfile && state.activeProfile._id === updated._id) {
+        state.activeProfile = updated;
+      }
+    });
+
+    // Delete profile
+    builder.addCase(deleteProfile.fulfilled, (state, action) => {
+      const id = action.payload as string;
+      state.profiles = state.profiles.filter((p) => p._id !== id);
+      if (state.activeProfile && state.activeProfile._id === id) {
+        state.activeProfile = state.profiles[0] || null;
+      }
     });
 
     // Fetch My List

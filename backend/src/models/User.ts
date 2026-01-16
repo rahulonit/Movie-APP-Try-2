@@ -103,7 +103,7 @@ const profileSchema = new Schema<IProfile>({
   },
   avatar: {
     type: String,
-    default: 'https://res.cloudinary.com/demo/image/upload/avatar-default.png'
+    default: 'https://pics.craiyon.com/2023-09-25/4c0c632eaebf4beb90ee1c0858969e15.webp'
   },
   isKids: {
     type: Boolean,

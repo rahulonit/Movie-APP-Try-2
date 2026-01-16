@@ -12,6 +12,8 @@ import {
 import { useDispatch } from 'react-redux';
 import { login } from '../store/slices/authSlice';
 import { AppDispatch } from '../store';
+import { setActiveProfile } from '../store/slices/profileSlice';
+import { setGuestAuth } from '../store/slices/authSlice';
 
 export default function LoginScreen({ navigation }: any) {
   const dispatch = useDispatch<AppDispatch>();
@@ -33,6 +35,14 @@ export default function LoginScreen({ navigation }: any) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleGuest = () => {
+    const guest = { _id: 'guest', name: 'Guest', avatar: '', isKids: false };
+    dispatch(setActiveProfile(guest));
+    // mark session as guest-authenticated so navigator shows Main
+    dispatch(setGuestAuth(null));
+    navigation.navigate('Main');
   };
 
   return (
@@ -77,6 +87,10 @@ export default function LoginScreen({ navigation }: any) {
           <Text style={styles.link}>
             Don't have an account? <Text style={styles.linkBold}>Sign Up</Text>
           </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.guestButton} onPress={handleGuest}>
+          <Text style={styles.guestText}>Continue as Guest</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -138,5 +152,14 @@ const styles = StyleSheet.create({
   linkBold: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  guestButton: {
+    marginTop: 18,
+    alignItems: 'center',
+    padding: 12,
+  },
+  guestText: {
+    color: '#bbb',
+    fontSize: 15,
   },
 });
