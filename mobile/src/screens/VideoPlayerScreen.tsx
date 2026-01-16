@@ -6,29 +6,34 @@ import {
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
+import type { AVPlaybackStatus } from 'expo-av';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store';
 import apiService from '../services/api';
 
-const { width, height } = Dimensions.get('window');
+const getDims = () => Dimensions.get('window');
 
 export default function VideoPlayerScreen({ route, navigation }: any) {
   const { playbackId, title, contentId, contentType, episodeId } = route.params;
   const { activeProfile } = useSelector((state: RootState) => state.profile);
   
   const videoRef = useRef<Video>(null);
-  const [status, setStatus] = useState<any>({});
+  const [status, setStatus] = useState<AVPlaybackStatus | null>(null);
   const [isBuffering, setIsBuffering] = useState(true);
   const progressIntervalRef = useRef<any>(null);
+  const [dims, setDims] = useState(getDims());
+  const lastTapLeft = useRef<number>(0);
+  const lastTapRight = useRef<number>(0);
 
   const streamUrl = `https://stream.mux.com/${playbackId}.m3u8`;
 
   useEffect(() => {
     // Update progress every 5 seconds
     progressIntervalRef.current = setInterval(() => {
-      if (status.isPlaying && activeProfile) {
+      if (status?.isLoaded && status.isPlaying && activeProfile) {
         updateProgress();
       }
     }, 5000);
@@ -38,13 +43,25 @@ export default function VideoPlayerScreen({ route, navigation }: any) {
         clearInterval(progressIntervalRef.current);
       }
       // Save final progress on unmount
-      if (status.positionMillis && activeProfile) {
+      if (status?.isLoaded && activeProfile) {
         updateProgress();
       }
     };
   }, [status, activeProfile]);
 
+  useEffect(() => {
+    const sub = Dimensions.addEventListener('change', ({ window }) => {
+      setDims(window);
+    });
+    return () => {
+      sub?.remove?.();
+    };
+  }, []);
+
   const updateProgress = async () => {
+    if (!status || !status.isLoaded || status.positionMillis == null || status.durationMillis == null) {
+      return;
+    }
     try {
       await apiService.updateProgress({
         profileId: activeProfile._id,
@@ -59,26 +76,55 @@ export default function VideoPlayerScreen({ route, navigation }: any) {
     }
   };
 
+  const seekBy = async (deltaMs: number) => {
+    try {
+      const current = await videoRef.current?.getStatusAsync();
+      if (!current || !current.isLoaded || current.positionMillis == null || current.durationMillis == null) return;
+      const next = Math.min(Math.max(0, current.positionMillis + deltaMs), current.durationMillis);
+      await videoRef.current?.setStatusAsync({ positionMillis: next });
+      setStatus((prev) => (prev && prev.isLoaded ? { ...prev, positionMillis: next } : prev));
+    } catch (e) {
+      // ignore seek errors
+    }
+  };
+
+  const handleDoubleTap = (side: 'left' | 'right') => {
+    const now = Date.now();
+    const ref = side === 'left' ? lastTapLeft : lastTapRight;
+    if (now - ref.current < 300) {
+      seekBy(side === 'left' ? -10000 : 10000);
+    }
+    ref.current = now;
+  };
+
   return (
     <View style={styles.container}>
       <TouchableOpacity
         style={styles.backButton}
         onPress={() => navigation.goBack()}
       >
-        <Text style={styles.backButtonText}>←</Text>
+        <Text style={styles.backButtonText}>X</Text>
       </TouchableOpacity>
 
-      <Video
-        ref={videoRef}
-        source={{ uri: streamUrl }}
-        style={styles.video}
-        useNativeControls
-        resizeMode={ResizeMode.CONTAIN}
-        shouldPlay
-        onPlaybackStatusUpdate={(status) => setStatus(status)}
-        onLoadStart={() => setIsBuffering(true)}
-        onLoad={() => setIsBuffering(false)}
-      />
+      <View style={{ width: dims.width, height: dims.height }}>
+        <TouchableWithoutFeedback onPress={() => handleDoubleTap('left')}>
+          <View style={styles.leftZone} />
+        </TouchableWithoutFeedback>
+        <TouchableWithoutFeedback onPress={() => handleDoubleTap('right')}>
+          <View style={styles.rightZone} />
+        </TouchableWithoutFeedback>
+        <Video
+          ref={videoRef}
+          source={{ uri: streamUrl }}
+          style={styles.video}
+          useNativeControls
+          resizeMode={ResizeMode.CONTAIN}
+          shouldPlay
+          onPlaybackStatusUpdate={(status) => setStatus(status)}
+          onLoadStart={() => setIsBuffering(true)}
+          onLoad={() => setIsBuffering(false)}
+        />
+      </View>
 
       {isBuffering && (
         <View style={styles.bufferingContainer}>
@@ -103,13 +149,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   video: {
-    width,
-    height,
+    width: '100%',
+    height: '100%',
   },
   backButton: {
     position: 'absolute',
     top: 50,
-    left: 16,
+    right: 16,
     zIndex: 10,
     backgroundColor: 'rgba(0,0,0,0.6)',
     width: 40,
@@ -136,6 +182,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginTop: 12,
     fontSize: 16,
+  },
+  leftZone: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: '50%',
+    zIndex: 5,
+  },
+  rightZone: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    width: '50%',
+    zIndex: 5,
   },
   titleContainer: {
     position: 'absolute',

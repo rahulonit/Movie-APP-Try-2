@@ -11,7 +11,7 @@ import {
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '../store';
 import { fetchMovieById } from '../store/slices/contentSlice';
-import { addToMyList, removeFromMyList } from '../store/slices/profileSlice';
+import { addToMyList, removeFromMyList, fetchMyList } from '../store/slices/profileSlice';
 
 export default function MovieDetailScreen({ route, navigation }: any) {
   const { id } = route.params;
@@ -52,12 +52,14 @@ export default function MovieDetailScreen({ route, navigation }: any) {
           profileId: activeProfile._id,
           contentId: currentMovie._id,
         })).unwrap();
+        await dispatch(fetchMyList(activeProfile._id));
         setInMyList(false);
       } else {
         await dispatch(addToMyList({
           profileId: activeProfile._id,
           contentId: currentMovie._id,
         })).unwrap();
+        await dispatch(fetchMyList(activeProfile._id));
         setInMyList(true);
       }
     } catch (error: any) {

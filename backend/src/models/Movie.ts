@@ -39,7 +39,8 @@ export enum Genre {
   WAR = 'War',
   WESTERN = 'Western',
   BIOGRAPHY = 'Biography',
-  SPORTS = 'Sports'
+  SPORTS = 'Sports',
+  ADULT18_PLUS = 'Adult 18+'
 }
 
 // Interfaces
@@ -179,11 +180,12 @@ const movieSchema = new Schema<IMovie>({
     min: 0
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  languageOverride: 'searchLanguage'
 });
 
 // Indexes for performance
-movieSchema.index({ title: 'text', description: 'text' });
+movieSchema.index({ title: 'text', description: 'text' }, { default_language: 'english', language_override: 'searchLanguage' });
 movieSchema.index({ genres: 1 });
 movieSchema.index({ language: 1 });
 movieSchema.index({ releaseYear: -1 });

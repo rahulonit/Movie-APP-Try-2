@@ -3,6 +3,7 @@ import { body } from 'express-validator';
 import {
   uploadImage,
   getMuxUploadUrl,
+  checkMediaIntegrations,
   createMovie,
   getAllMovies,
   updateMovie,
@@ -44,6 +45,7 @@ router.use(authenticate, authorizeAdmin);
 // ===== Media Upload =====
 router.post('/upload-image', uploadImageMiddleware.single('image'), uploadImage);
 router.get('/mux-upload-url', getMuxUploadUrl);
+router.get('/integrations/health', checkMediaIntegrations);
 
 // ===== Movie Management =====
 router.post(

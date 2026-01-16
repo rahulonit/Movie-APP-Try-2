@@ -91,7 +91,8 @@ export const addToMyList = createAsyncThunk(
   async ({ profileId, contentId }: { profileId: string; contentId: string }, { rejectWithValue }) => {
     try {
       await apiService.addToMyList(profileId, contentId);
-      return contentId;
+      const refreshed = await apiService.getMyList(profileId);
+      return refreshed.data.myList;
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Failed to add to My List');
     }
@@ -103,7 +104,8 @@ export const removeFromMyList = createAsyncThunk(
   async ({ profileId, contentId }: { profileId: string; contentId: string }, { rejectWithValue }) => {
     try {
       await apiService.removeFromMyList(profileId, contentId);
-      return contentId;
+      const refreshed = await apiService.getMyList(profileId);
+      return refreshed.data.myList;
     } catch (error: any) {
       return rejectWithValue(error.response?.data?.message || 'Failed to remove from My List');
     }
@@ -158,12 +160,12 @@ const profileSlice = createSlice({
 
     // Add to My List
     builder.addCase(addToMyList.fulfilled, (state, action) => {
-      // Will be refreshed on next fetch
+      state.myList = action.payload as any[];
     });
 
     // Remove from My List
     builder.addCase(removeFromMyList.fulfilled, (state, action) => {
-      state.myList = state.myList.filter((item: any) => item._id !== action.payload);
+      state.myList = action.payload as any[];
     });
   },
 });

@@ -197,11 +197,12 @@ const seriesSchema = new Schema<ISeries>({
     min: 0
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  languageOverride: 'searchLanguage'
 });
 
 // Indexes for performance
-seriesSchema.index({ title: 'text', description: 'text' });
+seriesSchema.index({ title: 'text', description: 'text' }, { default_language: 'english', language_override: 'searchLanguage' });
 seriesSchema.index({ genres: 1 });
 seriesSchema.index({ language: 1 });
 seriesSchema.index({ releaseYear: -1 });

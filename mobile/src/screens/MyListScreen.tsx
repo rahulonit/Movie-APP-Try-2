@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   FlatList,
   Image,
   TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '../store';
@@ -14,12 +15,25 @@ import { fetchMyList } from '../store/slices/profileSlice';
 export default function MyListScreen({ navigation }: any) {
   const dispatch = useDispatch<AppDispatch>();
   const { activeProfile, myList } = useSelector((state: RootState) => state.profile);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (activeProfile) {
       dispatch(fetchMyList(activeProfile._id));
     }
   }, [activeProfile]);
+
+  const onRefresh = async () => {
+    if (!activeProfile) return;
+    setRefreshing(true);
+    try {
+      await dispatch(fetchMyList(activeProfile._id)).unwrap();
+    } catch (e) {
+      // no-op; errors handled by thunk
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const renderItem = ({ item }: any) => (
     <TouchableOpacity
@@ -57,6 +71,9 @@ export default function MyListScreen({ navigation }: any) {
           keyExtractor={(item) => item._id}
           numColumns={3}
           contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />
+          }
         />
       )}
     </View>

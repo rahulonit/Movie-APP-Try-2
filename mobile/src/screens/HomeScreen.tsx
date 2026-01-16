@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   FlatList,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '../store';
@@ -19,10 +20,22 @@ const ITEM_WIDTH = width * 0.35;
 export default function HomeScreen({ navigation }: any) {
   const dispatch = useDispatch<AppDispatch>();
   const { homeFeed, isLoading } = useSelector((state: RootState) => state.content);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     dispatch(fetchHomeFeed());
   }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await dispatch(fetchHomeFeed()).unwrap();
+    } catch (e) {
+      // no-op; error is handled by slice
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const renderContentItem = ({ item }: any) => (
     <TouchableOpacity
@@ -67,7 +80,13 @@ export default function HomeScreen({ navigation }: any) {
   }
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />
+      }
+    >
       {/* Featured Content */}
       {homeFeed?.trending?.[0] && (
         <View style={styles.featured}>

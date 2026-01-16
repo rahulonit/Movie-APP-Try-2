@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { Movie } from '../models/Movie';
 import { Series } from '../models/Series';
-import { uploadToCloudinary, deleteFromCloudinary, extractPublicId } from '../config/cloudinary';
-import { createMuxUploadUrl, deleteMuxAsset, getMuxAsset } from '../config/mux';
+import cloudinary, { uploadToCloudinary, deleteFromCloudinary, extractPublicId } from '../config/cloudinary';
+import { createMuxUploadUrl, deleteMuxAsset, getMuxAsset, getMuxClient } from '../config/mux';
 
 // Upload image to Cloudinary
 export const uploadImage = async (req: Request, res: Response): Promise<void> => {
@@ -55,6 +55,50 @@ export const getMuxUploadUrl = async (_req: Request, res: Response): Promise<voi
       message: 'Error creating upload URL'
     });
   }
+};
+
+// Verify Cloudinary and Mux connectivity for admins
+export const checkMediaIntegrations = async (_req: Request, res: Response): Promise<void> => {
+  const cloudinaryStatus: { ok: boolean; message: string } = { ok: false, message: '' };
+  const muxStatus: { ok: boolean; message: string } = { ok: false, message: '' };
+
+  try {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      throw new Error('Missing Cloudinary environment variables');
+    }
+
+    const ping = await cloudinary.api.ping();
+    cloudinaryStatus.ok = ping?.status === 'ok';
+    cloudinaryStatus.message = cloudinaryStatus.ok ? 'Cloudinary reachable' : 'Cloudinary ping failed';
+  } catch (error: any) {
+    cloudinaryStatus.message = error?.message || 'Cloudinary check failed';
+  }
+
+  try {
+    if (!process.env.MUX_TOKEN_ID || !process.env.MUX_TOKEN_SECRET) {
+      throw new Error('Missing Mux environment variables');
+    }
+
+    const mux = getMuxClient();
+    const assets = await mux.Video.Assets.list({ limit: 1 });
+    muxStatus.ok = true;
+    muxStatus.message = Array.isArray((assets as any).data)
+      ? 'Mux authenticated'
+      : 'Mux reachable';
+  } catch (error: any) {
+    const detail = Array.isArray(error?.messages)
+      ? error.messages.join(', ')
+      : error?.message;
+    muxStatus.message = detail || 'Mux check failed';
+  }
+
+  res.status(cloudinaryStatus.ok && muxStatus.ok ? 200 : 503).json({
+    success: cloudinaryStatus.ok && muxStatus.ok,
+    data: {
+      cloudinary: cloudinaryStatus,
+      mux: muxStatus
+    }
+  });
 };
 
 // Create movie
