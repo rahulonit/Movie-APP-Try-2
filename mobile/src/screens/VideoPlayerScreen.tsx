@@ -1,141 +1,271 @@
-import React, { useEffect, useState, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-  ActivityIndicator,
-  TouchableWithoutFeedback,
-} from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
-import type { AVPlaybackStatus } from 'expo-av';
-import { useDispatch, useSelector } from 'react-redux';
+import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react';
+import { StyleSheet, View, TouchableOpacity, TouchableWithoutFeedback } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { WebView, WebViewMessageEvent } from 'react-native-webview';
+import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import apiService from '../services/api';
-
-const getDims = () => Dimensions.get('window');
+import * as ScreenOrientation from 'expo-screen-orientation';
 
 export default function VideoPlayerScreen({ route, navigation }: any) {
-  const { playbackId, title, contentId, contentType, episodeId } = route.params;
-  const { activeProfile } = useSelector((state: RootState) => state.profile);
-  
-  const videoRef = useRef<Video>(null);
-  const [status, setStatus] = useState<AVPlaybackStatus | null>(null);
-  const [isBuffering, setIsBuffering] = useState(true);
-  const progressIntervalRef = useRef<any>(null);
-  const [dims, setDims] = useState(getDims());
-  const lastTapLeft = useRef<number>(0);
-  const lastTapRight = useRef<number>(0);
-
-  const streamUrl = `https://stream.mux.com/${playbackId}.m3u8`;
+  const { cloudflareVideoId, title, contentId, contentType, episodeId } = route.params;
+  const activeProfile = useSelector((state: RootState) => state.profile.activeProfile);
+  const lastProgressSent = useRef<number>(0);
+  const webRef = useRef<WebView>(null);
+  const [paused, setPaused] = useState(false);
+  const [startPosition, setStartPosition] = useState<number>(0);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideControlsTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // Update progress every 5 seconds
-    progressIntervalRef.current = setInterval(() => {
-      if (status?.isLoaded && status.isPlaying && activeProfile) {
-        updateProgress();
-      }
-    }, 5000);
-
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
     return () => {
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-      }
-      // Save final progress on unmount
-      if (status?.isLoaded && activeProfile) {
-        updateProgress();
-      }
-    };
-  }, [status, activeProfile]);
-
-  useEffect(() => {
-    const sub = Dimensions.addEventListener('change', ({ window }) => {
-      setDims(window);
-    });
-    return () => {
-      sub?.remove?.();
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     };
   }, []);
 
-  const updateProgress = async () => {
-    if (!status || !status.isLoaded || status.positionMillis == null || status.durationMillis == null) {
-      return;
-    }
-    try {
-      await apiService.updateProgress({
-        profileId: activeProfile._id,
-        contentId,
-        contentType,
-        episodeId,
-        progress: Math.floor(status.positionMillis / 1000),
-        duration: Math.floor(status.durationMillis / 1000),
+  // Fetch last watched position
+  useEffect(() => {
+    if (!activeProfile) return;
+
+    apiService.getWatchHistory(activeProfile._id)
+      .then(response => {
+        const history = response.data.watchHistory || [];
+        const entry = history.find((h: any) => 
+          h.contentId === contentId && 
+          (!episodeId || h.episodeId === episodeId)
+        );
+        if (entry && entry.progress) {
+          // Resume from saved position (convert ms to seconds for player)
+          setStartPosition(entry.progress / 1000);
+        }
+      })
+      .catch(err => console.warn('Failed to fetch watch history', err));
+  }, [activeProfile, contentId, episodeId]);
+
+  const html = useMemo(() => {
+    const videoId = cloudflareVideoId || '';
+    const safeTitle = (title || '').replace(/</g, '&lt;');
+    const startTime = startPosition || 0;
+    // Note: Cloudflare Stream URLs use customer subdomain - update if needed
+    // Format: https://customer-<CODE>.cloudflarestream.com/<VIDEO_ID>/iframe
+    // For simplicity, using the basic iframe embed URL
+    return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <style>
+      html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+      iframe { width: 100%; height: 100%; border: none; }
+    </style>
+  </head>
+  <body>
+    <iframe
+      id="player"
+      src="https://iframe.cloudflarestream.com/${videoId}?autoplay=true&muted=false&startTime=${Math.floor(startTime)}"
+      allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+      allowfullscreen
+    ></iframe>
+    <script>
+      const iframe = document.getElementById('player');
+      const post = (payload) => {
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+        }
+      };
+      
+      let currentPosition = ${startTime};
+      let videoDuration = 0;
+      let isPaused = false;
+      
+      // Listen for Stream iframe postMessage API
+      window.addEventListener('message', (event) => {
+        if (event.data && typeof event.data === 'object') {
+          const data = event.data;
+          
+          if (data.event === 'timeupdate') {
+            currentPosition = data.currentTime || 0;
+            videoDuration = data.duration || 0;
+            post({ type: 'progress', position: currentPosition * 1000, duration: videoDuration * 1000, paused: isPaused });
+          } else if (data.event === 'play') {
+            isPaused = false;
+            post({ type: 'playstate', paused: false });
+          } else if (data.event === 'pause') {
+            isPaused = true;
+            post({ type: 'playstate', paused: true });
+          } else if (data.event === 'loadedmetadata') {
+            post({ type: 'ready' });
+          } else if (data.event === 'error') {
+            post({ type: 'error', message: 'Cloudflare Stream error' });
+          }
+        }
       });
-    } catch (error) {
-      console.error('Error updating progress:', error);
-    }
-  };
+      
+      // Handle messages from React Native
+      document.addEventListener('message', (event) => {
+        let data;
+        try { data = JSON.parse(event.data); } catch { return; }
+        if (!iframe || !iframe.contentWindow) return;
+        
+        if (data.type === 'seek' && typeof data.delta === 'number') {
+          const newTime = Math.max(0, Math.min(videoDuration, currentPosition + data.delta));
+          iframe.contentWindow.postMessage({ type: 'seek', time: newTime }, '*');
+        } else if (data.type === 'play') {
+          iframe.contentWindow.postMessage({ type: 'play' }, '*');
+        } else if (data.type === 'pause') {
+          iframe.contentWindow.postMessage({ type: 'pause' }, '*');
+        }
+      });
+      
+      // Request initial state
+      setTimeout(() => {
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage({ type: 'addEventListener', event: 'timeupdate' }, '*');
+          iframe.contentWindow.postMessage({ type: 'addEventListener', event: 'play' }, '*');
+          iframe.contentWindow.postMessage({ type: 'addEventListener', event: 'pause' }, '*');
+          iframe.contentWindow.postMessage({ type: 'addEventListener', event: 'loadedmetadata' }, '*');
+        }
+      }, 500);
+    </script>
+  </body>
+</html>`;
+  }, [cloudflareVideoId, title, startPosition]);
 
-  const seekBy = async (deltaMs: number) => {
-    try {
-      const current = await videoRef.current?.getStatusAsync();
-      if (!current || !current.isLoaded || current.positionMillis == null || current.durationMillis == null) return;
-      const next = Math.min(Math.max(0, current.positionMillis + deltaMs), current.durationMillis);
-      await videoRef.current?.setStatusAsync({ positionMillis: next });
-      setStatus((prev) => (prev && prev.isLoaded ? { ...prev, positionMillis: next } : prev));
-    } catch (e) {
-      // ignore seek errors
-    }
-  };
+  const handleMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      let data: any;
+      try {
+        data = JSON.parse(event.nativeEvent.data);
+      } catch {
+        return;
+      }
 
-  const handleDoubleTap = (side: 'left' | 'right') => {
+      if (data?.type === 'ready') {
+        setPlayerReady(true);
+      } else if (data?.type === 'playstate') {
+        setPaused(!!data.paused);
+      } else if (data?.type === 'progress') {
+        const { position, duration, paused: isPaused } = data;
+        setPaused(!!isPaused);
+        if (!activeProfile || isPaused) return;
+
+        const now = Date.now();
+        if (now - lastProgressSent.current < 5000) return;
+        lastProgressSent.current = now;
+
+        apiService
+          .updateProgress({
+            profileId: activeProfile._id,
+            contentId,
+            contentType,
+            episodeId,
+            progress: position,
+            duration,
+          })
+          .catch((err: any) => console.warn('Failed to update progress', err));
+      }
+    },
+    [activeProfile, contentId, contentType, episodeId]
+  );
+
+  const sendCommand = useCallback((payload: any) => {
+    webRef.current?.postMessage(JSON.stringify(payload));
+  }, []);
+
+  const showControlsTemporarily = useCallback(() => {
+    setControlsVisible(true);
+    
+    if (hideControlsTimeout.current) {
+      clearTimeout(hideControlsTimeout.current);
+    }
+    
+    hideControlsTimeout.current = setTimeout(() => {
+      setControlsVisible(false);
+    }, 4000);
+  }, []);
+
+  // Hide controls after initial display
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setControlsVisible(false);
+    }, 4000);
+    
+    return () => {
+      clearTimeout(timer);
+      if (hideControlsTimeout.current) {
+        clearTimeout(hideControlsTimeout.current);
+      }
+    };
+  }, []);
+
+  const lastLeftTap = useRef<number>(0);
+  const lastRightTap = useRef<number>(0);
+  const DOUBLE_TAP_MS = 350;
+
+  const onLeftTap = () => {
+    showControlsTemporarily();
     const now = Date.now();
-    const ref = side === 'left' ? lastTapLeft : lastTapRight;
-    if (now - ref.current < 300) {
-      seekBy(side === 'left' ? -10000 : 10000);
+    if (now - lastLeftTap.current < DOUBLE_TAP_MS) {
+      sendCommand({ type: 'seek', delta: -10 });
     }
-    ref.current = now;
+    lastLeftTap.current = now;
+  };
+
+  const onRightTap = () => {
+    showControlsTemporarily();
+    const now = Date.now();
+    if (now - lastRightTap.current < DOUBLE_TAP_MS) {
+      sendCommand({ type: 'seek', delta: 10 });
+    }
+    lastRightTap.current = now;
+  };
+
+  const togglePlayPause = () => {
+    showControlsTemporarily();
+    sendCommand({ type: paused ? 'play' : 'pause' });
   };
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => navigation.goBack()}
-      >
-        <Text style={styles.backButtonText}>X</Text>
-      </TouchableOpacity>
+      <WebView
+        ref={webRef}
+        originWhitelist={["*"]}
+        style={styles.player}
+        allowsInlineMediaPlayback
+        mediaPlaybackRequiresUserAction={false}
+        javaScriptEnabled
+        domStorageEnabled
+        source={{ html }}
+        onMessage={handleMessage}
+      />
 
-      <View style={{ width: dims.width, height: dims.height }}>
-        <TouchableWithoutFeedback onPress={() => handleDoubleTap('left')}>
-          <View style={styles.leftZone} />
-        </TouchableWithoutFeedback>
-        <TouchableWithoutFeedback onPress={() => handleDoubleTap('right')}>
-          <View style={styles.rightZone} />
-        </TouchableWithoutFeedback>
-        <Video
-          ref={videoRef}
-          source={{ uri: streamUrl }}
-          style={styles.video}
-          useNativeControls
-          resizeMode={ResizeMode.CONTAIN}
-          shouldPlay
-          onPlaybackStatusUpdate={(status) => setStatus(status)}
-          onLoadStart={() => setIsBuffering(true)}
-          onLoad={() => setIsBuffering(false)}
-        />
+      {/* Touch zones - leave bottom area for native controls */}
+      <View style={styles.touchLayer} pointerEvents="box-none">
+        <View style={styles.topArea} pointerEvents="box-none">
+          <View style={styles.row} pointerEvents="box-none">
+            <TouchableWithoutFeedback onPress={onLeftTap}>
+              <View style={styles.sideZone} />
+            </TouchableWithoutFeedback>
+            <TouchableWithoutFeedback onPress={togglePlayPause}>
+              <View style={[styles.centerZone, controlsVisible && styles.centerZoneVisible]}>
+                {controlsVisible && (
+                  <Ionicons name={paused ? 'play' : 'pause'} size={48} color="#fff" />
+                )}
+              </View>
+            </TouchableWithoutFeedback>
+            <TouchableWithoutFeedback onPress={onRightTap}>
+              <View style={styles.sideZone} />
+            </TouchableWithoutFeedback>
+          </View>
+        </View>
       </View>
 
-      {isBuffering && (
-        <View style={styles.bufferingContainer}>
-          <ActivityIndicator size="large" color="#E50914" />
-          <Text style={styles.bufferingText}>Loading...</Text>
-        </View>
-      )}
-
-      {title && (
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>{title}</Text>
+      {controlsVisible && (
+        <View style={styles.overlay}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -145,69 +275,60 @@ export default function VideoPlayerScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
+    backgroundColor: 'black',
   },
-  video: {
+  player: {
+    flex: 1,
+    backgroundColor: 'black',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+  iconButton: {
+    padding: 8,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 16,
+  },
+  touchLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+  },
+  topArea: {
+    width: '100%',
+    height: '70%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  row: {
+    flexDirection: 'row',
     width: '100%',
     height: '100%',
   },
-  backButton: {
-    position: 'absolute',
-    top: 50,
-    right: 16,
-    zIndex: 10,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  sideZone: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  centerZone: {
+    width: 140,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
+    alignSelf: 'center',
   },
-  backButtonText: {
-    color: '#fff',
-    fontSize: 24,
-  },
-  bufferingContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-  },
-  bufferingText: {
-    color: '#fff',
-    marginTop: 12,
-    fontSize: 16,
-  },
-  leftZone: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    width: '50%',
-    zIndex: 5,
-  },
-  rightZone: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    right: 0,
-    width: '50%',
-    zIndex: 5,
-  },
-  titleContainer: {
-    position: 'absolute',
-    top: 50,
-    left: 70,
-    right: 16,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  centerZoneVisible: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 70,
   },
 });

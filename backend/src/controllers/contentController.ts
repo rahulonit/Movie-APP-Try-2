@@ -18,19 +18,19 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<void> =>
     const trendingMovies = await Movie.find({ isPublished: true })
       .sort({ views: -1 })
       .limit(limit)
-      .select('-muxAssetId');
+      ;
 
     // New releases
     const newReleases = await Movie.find({ isPublished: true })
       .sort({ createdAt: -1 })
       .limit(limit)
-      .select('-muxAssetId');
+      ;
 
     // Trending series
     const trendingSeries = await Series.find({ isPublished: true })
       .sort({ totalViews: -1 })
       .limit(limit)
-      .select('-muxAssetId -seasons.episodes.muxAssetId');
+      .select('-muxAssetId');
 
     // Continue watching (if user has watch history)
     let continueWatching: any[] = [];
@@ -42,7 +42,7 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<void> =>
 
       for (const history of recentHistory) {
         if (history.contentType === 'Movie') {
-          const movie = await Movie.findById(history.contentId).select('-muxAssetId');
+          const movie = await Movie.findById(history.contentId);
           if (movie) {
             continueWatching.push({
               ...movie.toObject(),
@@ -52,7 +52,7 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<void> =>
           }
         } else {
           const series = await Series.findById(history.contentId)
-            .select('-seasons.episodes.muxAssetId');
+            ;
           if (series) {
             continueWatching.push({
               ...series.toObject(),
@@ -72,7 +72,7 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<void> =>
     })
       .sort({ views: -1 })
       .limit(limit)
-      .select('-muxAssetId');
+      ;
 
     // Comedy movies
     const comedyMovies = await Movie.find({
@@ -81,7 +81,7 @@ export const getHomeFeed = async (req: Request, res: Response): Promise<void> =>
     })
       .sort({ views: -1 })
       .limit(limit)
-      .select('-muxAssetId');
+      ;
 
     res.status(200).json({
       success: true,
@@ -132,8 +132,7 @@ export const getMovieById = async (req: Request, res: Response): Promise<void> =
           data: {
             movie: {
               ...movie.toObject(),
-              muxPlaybackId: null,
-              muxAssetId: null
+              cloudflareVideoId: null
             }
           }
         });
@@ -192,8 +191,7 @@ export const getSeriesById = async (req: Request, res: Response): Promise<void> 
                   ...seasonObj,
                   episodes: seasonObj.episodes.map((e: any) => ({
                     ...(e.toObject ? e.toObject() : e),
-                    muxPlaybackId: null,
-                    muxAssetId: null
+                    cloudflareVideoId: null
                   }))
                 };
               })
@@ -248,7 +246,7 @@ export const searchContent = async (req: Request, res: Response): Promise<void> 
     // Search movies
     if (!type || type === 'movie') {
       const movies = await Movie.find(query)
-        .select('-muxAssetId')
+        
         .skip(skip)
         .limit(limit)
         .sort(q ? { score: { $meta: 'textScore' } } : { createdAt: -1 });
@@ -260,7 +258,7 @@ export const searchContent = async (req: Request, res: Response): Promise<void> 
     // Search series
     if (!type || type === 'series') {
       const series = await Series.find(query)
-        .select('-seasons.episodes.muxAssetId')
+        
         .skip(skip)
         .limit(limit)
         .sort(q ? { score: { $meta: 'textScore' } } : { createdAt: -1 });
@@ -302,7 +300,7 @@ export const getMoviesByGenre = async (req: Request, res: Response): Promise<voi
       isPublished: true,
       genres: genre
     })
-      .select('-muxAssetId')
+      
       .skip(skip)
       .limit(limit)
       .sort({ views: -1 });
@@ -329,6 +327,99 @@ export const getMoviesByGenre = async (req: Request, res: Response): Promise<voi
     res.status(500).json({
       success: false,
       message: 'Error fetching movies'
+    });
+  }
+};
+
+// Get related/recommended content based on user's myList
+export const getRelatedContent = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { type } = req.query;
+    const userId = (req as any).user?.userId;
+
+    // Get the current content to find genres
+    let currentContent;
+    if (type === 'Movie') {
+      currentContent = await Movie.findById(id);
+    } else {
+      currentContent = await Series.findById(id);
+    }
+
+    if (!currentContent) {
+      res.status(404).json({
+        success: false,
+        message: 'Content not found'
+      });
+      return;
+    }
+
+    // Get user's myList to base recommendations on their favorites
+    const user = await User.findById(userId);
+    const activeProfile = user?.profiles[0];
+    const userMyList = activeProfile?.myList || [];
+
+    // First: Get movies/series with same genres from user's myList
+    let recommendations: any[] = [];
+
+    if (userMyList.length > 0) {
+      // Get full content objects from myList
+      const myListMovies = await Movie.find({
+        _id: { $in: userMyList, $ne: id },
+        isPublished: true
+      }).limit(5);
+
+      const myListSeries = await Series.find({
+        _id: { $in: userMyList, $ne: id },
+        isPublished: true
+      }).limit(5);
+
+      recommendations = [...myListMovies, ...myListSeries];
+    }
+
+    // If not enough from myList, add similar by genre
+    if (recommendations.length < 10 && currentContent.genres && currentContent.genres.length > 0) {
+      const genre = currentContent.genres[0];
+      const recommendedIds = recommendations.map(r => r._id.toString());
+
+      if (type === 'Movie') {
+        const similarMovies = await Movie.find({
+          isPublished: true,
+          genres: genre,
+          _id: { $ne: id, $nin: recommendedIds }
+        }).limit(10 - recommendations.length);
+        recommendations.push(...similarMovies);
+      } else {
+        const similarSeries = await Series.find({
+          isPublished: true,
+          genres: genre,
+          _id: { $ne: id, $nin: recommendedIds }
+        }).limit(10 - recommendations.length);
+        recommendations.push(...similarSeries);
+      }
+    }
+
+    // If still not enough, add trending content
+    if (recommendations.length < 10) {
+      const recommendedIds = recommendations.map(r => r._id.toString());
+      const trendingMovies = await Movie.find({
+        isPublished: true,
+        _id: { $ne: id, $nin: recommendedIds }
+      })
+        .sort({ views: -1 })
+        .limit(10 - recommendations.length);
+      recommendations.push(...trendingMovies);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: recommendations.slice(0, 10)
+    });
+  } catch (error) {
+    console.error('Get related content error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching recommendations'
     });
   }
 };

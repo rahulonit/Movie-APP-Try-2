@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
-import { Genre, Language, MaturityRating, IPoster } from './Movie';
+import { Genre, Language, MaturityRating, IPoster, IRating } from './Movie';
 
 // Interfaces
 export interface IEpisode {
@@ -8,8 +8,7 @@ export interface IEpisode {
   title: string;
   description: string;
   duration: number; // in minutes
-  muxPlaybackId: string;
-  muxAssetId: string;
+  cloudflareVideoId: string; // Cloudflare Stream video ID
   thumbnail: string; // Cloudinary URL
   views: number;
   toObject?: () => any;
@@ -35,6 +34,22 @@ export interface ISeries extends Document {
   isPremium: boolean;
   isPublished: boolean;
   totalViews: number;
+  // IMDB enrichment fields
+  imdbId?: string;
+  imdbRating?: number;
+  imdbLink?: string;
+  rated?: string;
+  released?: string;
+  runtime?: string;
+  director?: string;
+  writer?: string;
+  actors?: string;
+  plot?: string;
+  languages?: string;
+  country?: string;
+  awards?: string;
+  omdbPoster?: string;
+  ratings?: IRating[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -63,11 +78,7 @@ const episodeSchema = new Schema<IEpisode>({
     required: true,
     min: 1
   },
-  muxPlaybackId: {
-    type: String,
-    required: true
-  },
-  muxAssetId: {
+  cloudflareVideoId: {
     type: String,
     required: true
   },
@@ -195,10 +206,75 @@ const seriesSchema = new Schema<ISeries>({
     type: Number,
     default: 0,
     min: 0
+  },
+  // IMDB enrichment fields
+  imdbId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
+  imdbRating: {
+    type: Number,
+    min: 0,
+    max: 10
+  },
+  imdbLink: {
+    type: String,
+    validate: {
+      validator: function(url: string) {
+        return !url || /^https?:\/\/.+/.test(url);
+      },
+      message: 'Invalid IMDB URL format'
+    }
+  },
+  rated: {
+    type: String
+  },
+  released: {
+    type: String
+  },
+  runtime: {
+    type: String
+  },
+  director: {
+    type: String
+  },
+  writer: {
+    type: String
+  },
+  actors: {
+    type: String
+  },
+  plot: {
+    type: String
+  },
+  languages: {
+    type: String
+  },
+  country: {
+    type: String
+  },
+  awards: {
+    type: String
+  },
+  omdbPoster: {
+    type: String,
+    validate: {
+      validator: function(url: string) {
+        return !url || /^https?:\/\/.+/.test(url);
+      },
+      message: 'Invalid poster URL format'
+    }
+  },
+  ratings: {
+    type: [{
+      source: { type: String, required: true },
+      value: { type: String, required: true }
+    }],
+    default: []
   }
 }, {
   timestamps: true,
-  languageOverride: 'searchLanguage'
 });
 
 // Indexes for performance

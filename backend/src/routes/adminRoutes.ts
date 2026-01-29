@@ -2,8 +2,11 @@ import { Router } from 'express';
 import { body } from 'express-validator';
 import {
   uploadImage,
-  getMuxUploadUrl,
+  getCloudflareUploadUrl,
   checkMediaIntegrations,
+  searchImdb,
+  syncIndexes,
+  rebuildTextIndex,
   createMovie,
   getAllMovies,
   updateMovie,
@@ -44,8 +47,14 @@ router.use(authenticate, authorizeAdmin);
 
 // ===== Media Upload =====
 router.post('/upload-image', uploadImageMiddleware.single('image'), uploadImage);
-router.get('/mux-upload-url', getMuxUploadUrl);
+router.get('/cloudflare-upload-url', getCloudflareUploadUrl);
 router.get('/integrations/health', checkMediaIntegrations);
+
+// ===== IMDB Integration =====
+router.get('/search-imdb', searchImdb);
+
+// ===== Maintenance =====
+router.post('/maintenance/sync-indexes', syncIndexes);
 
 // ===== Movie Management =====
 router.post(
@@ -59,8 +68,7 @@ router.post(
     body('duration').isInt({ min: 1 }).withMessage('Valid duration required'),
     body('poster.vertical').isURL().withMessage('Valid poster URL required'),
     body('poster.horizontal').isURL().withMessage('Valid poster URL required'),
-    body('muxPlaybackId').notEmpty().withMessage('Mux playback ID required'),
-    body('muxAssetId').notEmpty().withMessage('Mux asset ID required'),
+    body('cloudflareVideoId').notEmpty().withMessage('Cloudflare video ID required'),
     body('maturityRating').isIn(['U', 'UA', 'A']).withMessage('Valid maturity rating required')
   ],
   validate,
@@ -106,8 +114,7 @@ router.post(
     body('title').trim().notEmpty().withMessage('Title required'),
     body('description').trim().notEmpty().withMessage('Description required'),
     body('duration').isInt({ min: 1 }).withMessage('Valid duration required'),
-    body('muxPlaybackId').notEmpty().withMessage('Mux playback ID required'),
-    body('muxAssetId').notEmpty().withMessage('Mux asset ID required'),
+    body('cloudflareVideoId').notEmpty().withMessage('Cloudflare video ID required'),
     body('thumbnail').isURL().withMessage('Valid thumbnail URL required')
   ],
   validate,
@@ -131,5 +138,8 @@ router.get('/users/:id/stats', getUserStats);
 router.put('/users/:id/subscription', updateUserSubscription);
 router.put('/users/:id/block', toggleBlockUser);
 router.delete('/users/:id', deleteUser);
+
+// ===== Maintenance =====
+router.post('/maintenance/rebuild-text-index', rebuildTextIndex);
 
 export default router;

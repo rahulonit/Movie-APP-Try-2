@@ -4,7 +4,8 @@ import {
   getMovieById,
   getSeriesById,
   searchContent,
-  getMoviesByGenre
+  getMoviesByGenre,
+  getRelatedContent
 } from '../controllers/contentController';
 import { authenticate } from '../middleware/auth';
 
@@ -19,5 +20,6 @@ router.get('/movies/:id', getMovieById);
 router.get('/series/:id', getSeriesById);
 router.get('/search', searchContent);
 router.get('/movies/genre/:genre', getMoviesByGenre);
+router.get('/:id/related', getRelatedContent);
 
 export default router;

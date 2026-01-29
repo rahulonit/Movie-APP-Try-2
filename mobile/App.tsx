@@ -2,12 +2,16 @@ import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Provider, useSelector } from 'react-redux';
+import { Provider, useDispatch, useSelector } from 'react-redux';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { store, RootState } from './src/store';
 import { loadStoredAuth } from './src/store/slices/authSlice';
+import { Ionicons } from '@expo/vector-icons';
+import { fetchProfiles, setActiveProfile } from './src/store/slices/profileSlice';
 
 // Screens
+import WelcomeScreen from './src/screens/WelcomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 import ProfileSelectionScreen from './src/screens/ProfileSelectionScreen';
@@ -18,6 +22,8 @@ import AccountScreen from './src/screens/AccountScreen';
 import MovieDetailScreen from './src/screens/MovieDetailScreen';
 import SeriesDetailScreen from './src/screens/SeriesDetailScreen';
 import VideoPlayerScreen from './src/screens/VideoPlayerScreen';
+import CategoryScreen from './src/screens/CategoryScreen';
+import EnhancedVideoPlayer from './src/screens/EnhancedVideoPlayer';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -25,27 +31,103 @@ const Tab = createBottomTabNavigator();
 function TabNavigator() {
   return (
     <Tab.Navigator
-      screenOptions={{
+      screenOptions={({ route }) => ({
         tabBarStyle: {
-          backgroundColor: '#000',
+          backgroundColor: '#1a1a1a',
           borderTopWidth: 0,
+          borderTopLeftRadius: 25,
+          borderTopRightRadius: 25,
+          height: 80,
+          paddingBottom: 20,
+          paddingTop: 15,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -5 },
+          shadowOpacity: 0.3,
+          shadowRadius: 10,
+          elevation: 10,
         },
         tabBarActiveTintColor: '#fff',
-        tabBarInactiveTintColor: '#808080',
+        tabBarInactiveTintColor: '#666',
         headerShown: false,
-      }}
+        tabBarIcon: ({ color, size, focused }) => {
+          let iconName: any = 'home';
+          if (route.name === 'Home') {
+            iconName = 'home';
+          } else if (route.name === 'Search') {
+            iconName = 'search';
+          } else if (route.name === 'My List') {
+            iconName = 'list';
+          } else if (route.name === 'Account') {
+            iconName = 'person';
+          }
+          
+          return (
+            <View style={[
+              styles.tabIconContainer,
+              focused && styles.tabIconActive
+            ]}>
+              <Ionicons name={iconName} size={size} color={color} />
+            </View>
+          );
+        },
+      })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Search" component={SearchScreen} />
-      <Tab.Screen name="My List" component={MyListScreen} />
-      <Tab.Screen name="Account" component={AccountScreen} />
+      <Tab.Screen 
+        name="Home" 
+        component={HomeScreen}
+      />
+      <Tab.Screen 
+        name="Search" 
+        component={SearchScreen}
+      />
+      <Tab.Screen 
+        name="My List" 
+        component={MyListScreen}
+      />
+      <Tab.Screen 
+        name="Account" 
+        component={AccountScreen}
+      />
     </Tab.Navigator>
   );
 }
 
+const styles = StyleSheet.create({
+  tabIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  tabIconActive: {
+    backgroundColor: '#333',
+  },
+});
+
+const LoadingScreen = () => (
+  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+    <ActivityIndicator size="large" color="#fff" />
+  </View>
+);
+
 function AppNavigator() {
+  const dispatch = useDispatch();
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
-  const { activeProfile } = useSelector((state: RootState) => state.profile);
+  const { activeProfile, profiles } = useSelector((state: RootState) => state.profile);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      dispatch(fetchProfiles() as any);
+    }
+  }, [dispatch, isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated && !activeProfile && profiles.length > 0) {
+      dispatch(setActiveProfile(profiles[0]));
+    }
+  }, [isAuthenticated, activeProfile, profiles, dispatch]);
 
   return (
     <Stack.Navigator
@@ -56,8 +138,10 @@ function AppNavigator() {
     >
       {!isAuthenticated ? (
         <>
+          <Stack.Screen name="Welcome" component={WelcomeScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Register" component={RegisterScreen} />
+          <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} />
         </>
       ) : !activeProfile ? (
         <Stack.Screen name="ProfileSelection" component={ProfileSelectionScreen} />
@@ -67,6 +151,15 @@ function AppNavigator() {
           <Stack.Screen name="MovieDetail" component={MovieDetailScreen} />
           <Stack.Screen name="SeriesDetail" component={SeriesDetailScreen} />
           <Stack.Screen name="VideoPlayer" component={VideoPlayerScreen} />
+          <Stack.Screen name="EnhancedVideoPlayer">
+            {({ route, navigation }) => (
+              <EnhancedVideoPlayer
+                {...(route.params as any)}
+                onBack={() => navigation.goBack()}
+              />
+            )}
+          </Stack.Screen>
+          <Stack.Screen name="Category" component={CategoryScreen} />
         </>
       )}
     </Stack.Navigator>

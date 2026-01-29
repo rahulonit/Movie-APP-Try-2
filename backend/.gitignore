@@ -36,3 +36,6 @@ coverage/
 
 # Uploads
 uploads/
+package-copy.json
+.vercel
+.env*.local

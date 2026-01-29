@@ -1,8 +1,10 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { Movie } from '../models/Movie';
 import { Series } from '../models/Series';
 import cloudinary, { uploadToCloudinary, deleteFromCloudinary, extractPublicId } from '../config/cloudinary';
-import { createMuxUploadUrl, deleteMuxAsset, getMuxAsset, getMuxClient } from '../config/mux';
+import { getCloudflareStreamClient } from '../config/cloudflareStream';
+import { searchMovies, getMovieDetails, parseMovieDetails } from '../config/omdb';
 
 // Upload image to Cloudinary
 export const uploadImage = async (req: Request, res: Response): Promise<void> => {
@@ -35,32 +37,50 @@ export const uploadImage = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-// Get Mux upload URL for direct video uploads
-export const getMuxUploadUrl = async (_req: Request, res: Response): Promise<void> => {
+// Get Cloudflare Stream upload URL for direct video uploads
+export const getCloudflareUploadUrl = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const result = await createMuxUploadUrl();
+    const cfClient = getCloudflareStreamClient();
+    const result = await cfClient.requestUploadURL();
 
     res.status(200).json({
       success: true,
       message: 'Upload URL created',
       data: {
-        uploadUrl: result.uploadUrl,
-        assetId: result.assetId
+        uploadURL: result.uploadURL,
+        videoId: result.videoId
       }
     });
-  } catch (error) {
-    console.error('Get Mux upload URL error:', error);
+  } catch (error: any) {
+    console.error('Get Cloudflare upload URL error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error creating upload URL'
+      message: 'Error getting upload URL',
+      error: error?.message || 'Unknown error'
     });
   }
 };
 
-// Verify Cloudinary and Mux connectivity for admins
+// Admin maintenance: sync MongoDB indexes to match schema
+export const syncIndexes = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    await Movie.syncIndexes();
+    await Series.syncIndexes();
+    res.status(200).json({ success: true, message: 'Indexes synced' });
+  } catch (error: any) {
+    console.error('Sync indexes error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error syncing indexes',
+      debug: { error: error?.message || error?.toString() }
+    });
+  }
+};
+
+// Verify Cloudinary and Cloudflare connectivity for admins
 export const checkMediaIntegrations = async (_req: Request, res: Response): Promise<void> => {
   const cloudinaryStatus: { ok: boolean; message: string } = { ok: false, message: '' };
-  const muxStatus: { ok: boolean; message: string } = { ok: false, message: '' };
+  const cloudflareStatus: { ok: boolean; message: string } = { ok: false, message: '' };
 
   try {
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
@@ -75,30 +95,90 @@ export const checkMediaIntegrations = async (_req: Request, res: Response): Prom
   }
 
   try {
-    if (!process.env.MUX_TOKEN_ID || !process.env.MUX_TOKEN_SECRET) {
-      throw new Error('Missing Mux environment variables');
+    if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.CLOUDFLARE_API_TOKEN) {
+      throw new Error('Missing Cloudflare environment variables');
     }
 
-    const mux = getMuxClient();
-    const assets = await mux.Video.Assets.list({ limit: 1 });
-    muxStatus.ok = true;
-    muxStatus.message = Array.isArray((assets as any).data)
-      ? 'Mux authenticated'
-      : 'Mux reachable';
+    const cfClient = getCloudflareStreamClient();
+    await cfClient.listVideos(1);
+    cloudflareStatus.ok = true;
+    cloudflareStatus.message = 'Cloudflare Stream authenticated';
   } catch (error: any) {
-    const detail = Array.isArray(error?.messages)
-      ? error.messages.join(', ')
-      : error?.message;
-    muxStatus.message = detail || 'Mux check failed';
+    cloudflareStatus.message = error?.message || 'Cloudflare check failed';
   }
 
-  res.status(cloudinaryStatus.ok && muxStatus.ok ? 200 : 503).json({
-    success: cloudinaryStatus.ok && muxStatus.ok,
+  res.status(cloudinaryStatus.ok && cloudflareStatus.ok ? 200 : 503).json({
+    success: cloudinaryStatus.ok && cloudflareStatus.ok,
     data: {
       cloudinary: cloudinaryStatus,
-      mux: muxStatus
+      cloudflare: cloudflareStatus
     }
   });
+};
+
+// Search movie on IMDB and fetch enriched data
+export const searchImdb = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { query } = req.query;
+
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({
+        success: false,
+        message: 'Search query required'
+      });
+      return;
+    }
+
+    console.log('[searchImdb] Searching for:', query);
+    console.log('[searchImdb] OMDB_API_KEY configured:', !!process.env.OMDB_API_KEY);
+
+    const results = await searchMovies(query, 'movie');
+    console.log('[searchImdb] Search results received:', results.length, 'movies');
+    
+    if (results.length === 0) {
+      res.status(200).json({
+        success: true,
+        message: 'No results found',
+        data: []
+      });
+      return;
+    }
+
+    // Fetch detailed info for top 3 results
+    const detailedResults = await Promise.all(
+      results.slice(0, 3).map(async (result) => {
+        try {
+          const details = await getMovieDetails(result.imdbID, true);
+          if (!details) return null;
+
+          const parsed = parseMovieDetails(details);
+          return {
+            ...parsed,
+            year: result.Year,
+            poster: result.Poster
+          };
+        } catch (error: any) {
+          console.warn('[searchImdb] Failed to fetch details for', result.imdbID, error?.message);
+          return null;
+        }
+      })
+    );
+
+    const filtered = detailedResults.filter(r => r !== null);
+
+    res.status(200).json({
+      success: true,
+      message: `Found ${filtered.length} result(s)`,
+      data: filtered
+    });
+  } catch (error: any) {
+    console.error('[searchImdb] Error:', error?.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error searching IMDB',
+      error: error?.message || 'Unknown error'
+    });
+  }
 };
 
 // Create movie
@@ -114,23 +194,42 @@ export const createMovie = async (req: Request, res: Response): Promise<void> =>
       rating,
       poster,
       trailerUrl,
-      muxPlaybackId,
-      muxAssetId,
+      cloudflareVideoId,
       maturityRating,
-      isPremium
+      isPremium,
+      // Optional IMDB enrichment fields
+      imdbId,
+      imdbRating,
+      imdbLink,
+      rated,
+      released,
+      runtime,
+      director,
+      writer,
+      actors,
+      plot,
+      languages,
+      country,
+      awards,
+      omdbPoster,
+      ratings
     } = req.body;
 
-    // Verify Mux asset exists
-    const muxAsset = await getMuxAsset(muxAssetId);
-    if (!muxAsset || muxAsset.status !== 'ready') {
+    // Verify Cloudflare video exists
+    try {
+      const cfClient = getCloudflareStreamClient();
+      await cfClient.getVideoDetails(cloudflareVideoId);
+    } catch (videoErr: any) {
+      console.error('Cloudflare video lookup error:', videoErr);
       res.status(400).json({
         success: false,
-        message: 'Mux asset not ready or not found'
+        message: 'Invalid Cloudflare video ID',
+        error: videoErr?.message || 'Video not found'
       });
       return;
     }
 
-    const movie = await Movie.create({
+    const movieData: any = {
       title,
       description,
       genres,
@@ -140,23 +239,45 @@ export const createMovie = async (req: Request, res: Response): Promise<void> =>
       rating: rating || 0,
       poster,
       trailerUrl,
-      muxPlaybackId,
-      muxAssetId,
+      cloudflareVideoId,
       maturityRating,
       isPremium: isPremium || false,
       isPublished: true
-    });
+    };
+
+    // Add IMDB enrichment fields if provided
+    if (imdbId) movieData.imdbId = imdbId;
+    if (imdbRating) movieData.imdbRating = imdbRating;
+    if (imdbLink) movieData.imdbLink = imdbLink;
+    if (rated) movieData.rated = rated;
+    if (released) movieData.released = released;
+    if (runtime) movieData.runtime = runtime;
+    if (director) movieData.director = director;
+    if (writer) movieData.writer = writer;
+    if (actors) movieData.actors = actors;
+    if (plot) movieData.plot = plot;
+    if (languages) movieData.languages = languages;
+    if (country) movieData.country = country;
+    if (awards) movieData.awards = awards;
+    if (omdbPoster) movieData.omdbPoster = omdbPoster;
+    if (ratings && Array.isArray(ratings)) movieData.ratings = ratings;
+
+    const movie = await Movie.create(movieData);
 
     res.status(201).json({
       success: true,
       message: 'Movie created',
       data: { movie }
     });
-  } catch (error) {
-    console.error('Create movie error:', error);
+  } catch (error: any) {
+    console.error('Create movie error:', JSON.stringify(error, null, 2));
     res.status(500).json({
       success: false,
-      message: 'Error creating movie'
+      message: 'Error creating movie',
+      debug: {
+        error: error?.message || error?.toString(),
+        details: error?.response?.data || error
+      }
     });
   }
 };
@@ -236,11 +357,15 @@ export const updateMovie = async (req: Request, res: Response): Promise<void> =>
       message: 'Movie updated',
       data: { movie }
     });
-  } catch (error) {
-    console.error('Update movie error:', error);
+  } catch (error: any) {
+    console.error('Update movie error:', JSON.stringify(error, null, 2));
     res.status(500).json({
       success: false,
-      message: 'Error updating movie'
+      message: 'Error updating movie',
+      debug: {
+        error: error?.message || error?.toString(),
+        details: error?.response?.data || error
+      }
     });
   }
 };
@@ -273,11 +398,12 @@ export const deleteMovie = async (req: Request, res: Response): Promise<void> =>
       console.error('Cloudinary deletion error:', cloudinaryError);
     }
 
-    // Delete from Mux
+    // Delete from Cloudflare Stream
     try {
-      await deleteMuxAsset(movie.muxAssetId);
-    } catch (muxError) {
-      console.error('Mux deletion error:', muxError);
+      const cfClient = getCloudflareStreamClient();
+      await cfClient.deleteVideo(movie.cloudflareVideoId);
+    } catch (cfError) {
+      console.error('Cloudflare deletion error:', cfError);
     }
 
     // Delete from database
@@ -450,13 +576,14 @@ export const deleteSeries = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    // Delete all episode videos from Mux
+    // Delete all episode videos from Cloudflare Stream
+    const cfClient = getCloudflareStreamClient();
     for (const season of series.seasons) {
       for (const episode of season.episodes) {
         try {
-          await deleteMuxAsset(episode.muxAssetId);
-        } catch (muxError) {
-          console.error(`Error deleting episode ${episode._id}:`, muxError);
+          await cfClient.deleteVideo(episode.cloudflareVideoId);
+        } catch (cfError) {
+          console.error(`Error deleting episode ${episode._id}:`, cfError);
         }
 
         // Delete episode thumbnail
@@ -564,13 +691,15 @@ export const addEpisode = async (req: Request, res: Response): Promise<void> => 
       title,
       description,
       duration,
-      muxPlaybackId,
-      muxAssetId,
+      cloudflareVideoId,
       thumbnail
     } = req.body;
 
+    console.log('[addEpisode] Received:', { seriesId, seasonNumber, episodeNumber, cloudflareVideoId });
+
     const series = await Series.findById(seriesId);
     if (!series) {
+      console.log('[addEpisode] Series not found:', seriesId);
       res.status(404).json({
         success: false,
         message: 'Series not found'
@@ -580,6 +709,7 @@ export const addEpisode = async (req: Request, res: Response): Promise<void> => 
 
     const season = series.seasons.find(s => s.seasonNumber === parseInt(seasonNumber));
     if (!season) {
+      console.log('[addEpisode] Season not found:', seasonNumber);
       res.status(404).json({
         success: false,
         message: 'Season not found'
@@ -587,39 +717,47 @@ export const addEpisode = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Verify Mux asset
-    const muxAsset = await getMuxAsset(muxAssetId);
-    if (!muxAsset || muxAsset.status !== 'ready') {
-      res.status(400).json({
-        success: false,
-        message: 'Mux asset not ready or not found'
-      });
-      return;
+    // Verify Cloudflare video exists
+    try {
+      const cfClient = getCloudflareStreamClient();
+      const videoDetails = await cfClient.getVideoDetails(cloudflareVideoId);
+      console.log('[addEpisode] Video verified:', { cloudflareVideoId, status: videoDetails?.status });
+    } catch (cfError: any) {
+      console.warn('[addEpisode] Cloudflare video verification failed:', cfError?.message);
+      // Continue anyway - video might be valid but API call failed
     }
 
-    season.episodes.push({
-      episodeNumber,
-      title,
-      description,
-      duration,
-      muxPlaybackId,
-      muxAssetId,
-      thumbnail,
+    // Create episode object with required fields
+    const newEpisode = {
+      episodeNumber: parseInt(episodeNumber),
+      title: title.trim(),
+      description: description.trim(),
+      duration: parseInt(duration),
+      cloudflareVideoId: cloudflareVideoId.trim(),
+      thumbnail: thumbnail.trim(),
       views: 0
-    });
+    };
 
+    console.log('[addEpisode] Adding episode:', newEpisode);
+    season.episodes.push(newEpisode);
+    
+    console.log('[addEpisode] Saving series...');
     await series.save();
+    
+    console.log('[addEpisode] Episode added successfully');
 
     res.status(201).json({
       success: true,
       message: 'Episode added',
       data: { episode: season.episodes[season.episodes.length - 1] }
     });
-  } catch (error) {
-    console.error('Add episode error:', error);
+  } catch (error: any) {
+    console.error('[addEpisode] ERROR:', error?.message || error);
+    console.error('[addEpisode] Stack:', error?.stack);
     res.status(500).json({
       success: false,
-      message: 'Error adding episode'
+      message: 'Error adding episode',
+      error: error?.message || 'Unknown error'
     });
   }
 };
@@ -661,11 +799,12 @@ export const deleteEpisode = async (req: Request, res: Response): Promise<void> 
 
     const episode = season.episodes[episodeIndex];
 
-    // Delete from Mux
+    // Delete from Cloudflare Stream
     try {
-      await deleteMuxAsset(episode.muxAssetId);
-    } catch (muxError) {
-      console.error('Mux deletion error:', muxError);
+      const cfClient = getCloudflareStreamClient();
+      await cfClient.deleteVideo(episode.cloudflareVideoId);
+    } catch (cfError) {
+      console.error('Cloudflare deletion error:', cfError);
     }
 
     // Delete thumbnail from Cloudinary
@@ -690,5 +829,19 @@ export const deleteEpisode = async (req: Request, res: Response): Promise<void> 
       success: false,
       message: 'Error deleting episode'
     });
+  }
+};
+
+export const rebuildTextIndex = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const Movie = mongoose.model('Movie');
+    await Movie.collection.dropIndex('title_text_description_text');
+    await Movie.collection.createIndex(
+      { title: 'text', description: 'text' },
+      { language_override: 'searchLanguage' }
+    );
+    res.json({ success: true, message: 'Text index rebuilt successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: 'Error rebuilding text index', error: error.message });
   }
 };
