@@ -14,12 +14,12 @@ const router = Router();
 // All content routes require authentication
 router.use(authenticate);
 
-// Routes
+// Routes - order matters! Specific routes before generic ID routes
 router.get('/home', getHomeFeed);
 router.get('/search', searchContent);
 router.get('/movies/genre/:genre', getMoviesByGenre);
-// Related content route - must come before specific ID routes
-router.get('/:id/related', getRelatedContent);
+// Related content route - uses /content/:id/related path
+router.get('/content/:id/related', getRelatedContent);
 router.get('/movies/:id', getMovieById);
 router.get('/series/:id', getSeriesById);
 
